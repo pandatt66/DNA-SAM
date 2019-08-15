@@ -1,0 +1,72 @@
+configfile: "config.json"
+sysname = config['sysname']
+
+
+nuc_list = ["dCMP","dTMP","dGMP","dAMP"]
+
+rule plot_zcoord_dnmps:
+  run:
+     import plot
+     plot.plot_zcoord('1_coord_fixed', 'dat', ["dCMP","dTMP","dGMP","dAMP"], 'zcoord')
+
+
+
+#calculte crossing time and adsorption/desorption velocities
+rule slit_cross_time:
+  input:
+    py = "slit_crossing_time.py"
+  params:
+    sysname = config['sysname']
+  shell:
+    '''
+    rm ./velocities -rf
+    mkdir velocities
+    python {input.py} 1_coord_fixed dat slit_cross_time {params.sysname}
+    '''
+
+rule slit_ads_des_uncertainty:
+  output:
+    ads_upper_error = "velocities/ads_upper_all_velocity_{nuc}_block_error_extrapolation_0.dat",
+    ads_lower_error = "velocities/ads_lower_all_velocity_{nuc}_block_error_extrapolation_0.dat",
+    des_error = "velocities/des_all_velocity_{nuc}_block_error_extrapolation_0.dat"
+
+  params:
+    sysname = "{nuc}"
+  shell:
+    '''
+     python confidence_interval.py ./velocities/ads_lower_all_velocity_{params.sysname}.xvg 1 -tu ps -eq 0
+     python confidence_interval.py ./velocities/ads_upper_all_velocity_{params.sysname}.xvg 1 -tu ps -eq 0
+     python confidence_interval.py ./velocities/des_all_velocity_{params.sysname}.xvg 1 -tu ps -eq 0
+    '''
+
+rule slit_ads_des_uncertainties:
+   input:
+     expand(rules.slit_ads_des_uncertainty.output,nuc = nuc_list)
+
+rule slit_ads_uncertainty_propagation:
+  input:
+     py = "ads_velocity_uncertainty_propagation.py"
+  shell:
+     '''
+      rm velocities/ads_vel_mean_with_propagated_error.dat -rf
+      python {input.py} {sysname}
+     '''
+
+
+rule equil_nonequil_prob:
+  input:
+    py = "plot_zcoord_and_pmf_to_prob.py",
+    pmf = "{nuc}_zcoord_to_prob.dat"
+
+  output:
+    "{nuc}_equil_nonequil_prob_{sysname}.png"
+
+  shell:
+   '''
+  	python {input.py} dat equil_nonequil_prob {sysname}
+   '''
+
+
+rule equil_nonequil_probs:
+   input:
+     expand(rules.equil_nonequil_prob.output,nuc = nuc_list,sysname=sysname)
